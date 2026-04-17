@@ -11,6 +11,10 @@ def load_links():
             return f.read()
     return ""
 
+def save_links(links):
+    with open("yt-link.txt", "w") as f:
+        f.write(links)
+
 def load_pdf():
     pdf_files = glob.glob(os.path.join("merged","**", "*.pdf"))
     pdf_files.sort(key=os.path.getmtime, reverse=True)  # file mới nhất lên đầu
@@ -47,6 +51,8 @@ def toggle_source(source):
         )
 
 def run_tab_scraper(source_type, link_input, videos, interval_sec, start_sec, end_sec, cleanup):
+    save_links(link_input)
+    
     try:
         if source_type == "YouTube Links":
             type = "links"

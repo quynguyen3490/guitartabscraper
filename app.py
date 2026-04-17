@@ -6,6 +6,7 @@ from PIL import Image
 import shutil
 from skimage.metrics import structural_similarity as ssim
 import numpy as np
+import imagehash
 
 # ===== CONFIG =====
 VIDEO_DIR = "cache\\video"
@@ -170,41 +171,46 @@ def sort_by_index(filename):
     return int(filename.rsplit("_", 1)[-1].split(".")[0])
 
 
-def is_duplicate(img1, img2, threshold=0.82):
-    # Resize cùng kích thước
-    img1 = cv2.resize(img1, (320, 120))
-    img2 = cv2.resize(img2, (320, 120))
+def check_duplicate(img1_cv, img2_cv):
+    # 1. Kiểm tra đầu vào
+    if img1_cv is None or img2_cv is None:
+        return False
 
-    # Chuyển sang grayscale
-    gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
-    gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+    # 2. Đảm bảo ảnh ở dạng Grayscale (nếu là ảnh màu 3 kênh thì chuyển về 1 kênh)
+    def to_gray(img):
+        if len(img.shape) == 3:
+            return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return img
 
-    # === Cách 1: Tăng trọng số cho vùng có highlight (khuyến nghị nhất) ===
-    # Tạo mask phát hiện vùng sáng bất thường (thanh xanh hoặc highlight)
-    _, mask1 = cv2.threshold(gray1, 200, 255, cv2.THRESH_BINARY)   # vùng rất sáng
-    _, mask2 = cv2.threshold(gray2, 200, 255, cv2.THRESH_BINARY)
-    
-    # Kết hợp mask
-    highlight_mask = cv2.bitwise_or(mask1, mask2)
-    # Mở rộng mask một chút
-    kernel = np.ones((5,5), np.uint8)
-    highlight_mask = cv2.dilate(highlight_mask, kernel, iterations=1)
-    
-    # Tính SSIM bình thường
-    score_normal, _ = ssim(gray1, gray2, full=True)
-    
-    # Tính SSIM chỉ trên vùng KHÔNG có highlight (bỏ qua thanh xanh)
-    mask_inv = cv2.bitwise_not(highlight_mask)
-    if np.sum(mask_inv) > 1000:  # tránh trường hợp mask quá lớn
-        score_no_highlight = ssim(gray1, gray2, full=True, data_range=255)[0]
-        # Kết hợp: ưu tiên vùng không highlight
-        final_score = (score_normal * 0.4) + (score_no_highlight * 0.6)
-    else:
-        final_score = score_normal
+    gray1 = to_gray(img1_cv)
+    gray2 = to_gray(img2_cv)
 
-    print(f"SSIM normal: {score_normal:.4f} | Final score: {final_score:.4f}")
+    # 3. Resize ảnh 2 về cùng kích thước với ảnh 1
+    height, width = gray1.shape
+    gray2_resized = cv2.resize(gray2, (width, height))
+
+    # --- LỚP 1: SSIM (So sánh cấu trúc tổng thể) ---
+    # win_size=7 để xử lý tốt các chi tiết nhỏ như nốt nhạc
+    score_ssim, _ = ssim(gray1, gray2_resized, full=True)
     
-    return final_score > threshold
+    # --- LỚP 2: DHash (So sánh chi tiết nốt nhạc) ---
+    # Chuyển từ mảng NumPy (OpenCV) sang PIL Image để imagehash có thể đọc được
+    pil_img1 = Image.fromarray(gray1)
+    pil_img2 = Image.fromarray(gray2_resized)
+    
+    hash1 = imagehash.dhash(pil_img1)
+    hash2 = imagehash.dhash(pil_img2)
+    hash_diff = hash1 - hash2 # Khoảng cách Hamming
+
+    # Log để debug nếu cần
+    # print(f"DEBUG: SSIM = {score_ssim:.4f} | Hash Diff = {hash_diff}")
+
+    # --- ĐIỀU KIỆN KẾT HỢP ---
+    # SSIM > 0.9: Cùng bố cục, cùng font chữ, cùng lề
+    # Hash Diff <= 2: Các nốt nhạc nằm đúng vị trí (ngưỡng 14 bạn để hơi cao, dễ bị nhận nhầm)
+    is_duplicate = (score_ssim >= 0.80) and (hash_diff <= 20)
+    
+    return is_duplicate
 
 # ===== DETECT + CROP =====
 # def detect_and_crop():
@@ -267,7 +273,7 @@ def detect_and_crop():
 
             # 👉 bỏ crop trùng
             if last_crop is not None:
-                if is_duplicate(crop, last_crop):
+                if check_duplicate(crop, last_crop):
                     continue
 
             base_name = os.path.splitext(os.path.basename(img_path))[0]
@@ -289,6 +295,8 @@ def clean_filename(name):
 
 # ===== RUN PROCESS =====
 def run_process(interval_sec, start_sec=0, end_sec=None, cleanup=True, type="links", links=None, videos=None):
+    cleanup_temp_files()
+
     if type == "links":
         # ===== READ LINKS =====
         with open("yt-link.txt", "r") as f:

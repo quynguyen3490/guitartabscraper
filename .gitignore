@@ -1,4 +1,7 @@
 __pycache__/
+cache/
+merged/
+.vscode/
 *.pyc
 *.pyo
 *.pyd
@@ -6,5 +9,6 @@ __pycache__/
 .env
 venv/
 .env.*
+.venv/
 
 *.log
