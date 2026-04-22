@@ -7,6 +7,8 @@ import shutil
 from skimage.metrics import structural_similarity as ssim
 import numpy as np
 import imagehash
+import check_duplicate as duplicate_checker
+import check_duplicate_model as duplicate_model_checker
 
 # ===== CONFIG =====
 VIDEO_DIR = "cache\\video"
@@ -32,6 +34,7 @@ def merge_crops_to_image_and_pdf():
 
     groups = defaultdict(list)
 
+    os.makedirs(CROP_DIR, exist_ok=True)
     # nhóm theo video name
     for f in os.listdir(CROP_DIR):
         if not f.endswith(".jpg"):
@@ -68,9 +71,9 @@ def merge_crops_to_image_and_pdf():
         output_dir = os.path.join(MERGED_DIR, video_name)
         os.makedirs(output_dir, exist_ok=True)
 
-        # save image
-        img_path = os.path.join(output_dir, f"{video_name}_all_tabs.jpg")
-        merged.save(img_path, quality=95)
+        # # save image
+        # img_path = os.path.join(output_dir, f"{video_name}_all_tabs.jpg")
+        # merged.save(img_path, quality=95)
 
         # save pdf
         pdf_path = os.path.join(output_dir, f"{video_name}_all_tabs.pdf")
@@ -170,76 +173,10 @@ def capture_frames(video_path, interval_sec, start_sec=0, end_sec=None):
 def sort_by_index(filename):
     return int(filename.rsplit("_", 1)[-1].split(".")[0])
 
+def detect_and_crop(similarity_threshold=0.96):
+    duplicate_checker_model = duplicate_model_checker.ImageComparator(
+        threshold=similarity_threshold)
 
-def check_duplicate(img1_cv, img2_cv):
-    # 1. Kiểm tra đầu vào
-    if img1_cv is None or img2_cv is None:
-        return False
-
-    # 2. Đảm bảo ảnh ở dạng Grayscale (nếu là ảnh màu 3 kênh thì chuyển về 1 kênh)
-    def to_gray(img):
-        if len(img.shape) == 3:
-            return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        return img
-
-    gray1 = to_gray(img1_cv)
-    gray2 = to_gray(img2_cv)
-
-    # 3. Resize ảnh 2 về cùng kích thước với ảnh 1
-    height, width = gray1.shape
-    gray2_resized = cv2.resize(gray2, (width, height))
-
-    # --- LỚP 1: SSIM (So sánh cấu trúc tổng thể) ---
-    # win_size=7 để xử lý tốt các chi tiết nhỏ như nốt nhạc
-    score_ssim, _ = ssim(gray1, gray2_resized, full=True)
-    
-    # --- LỚP 2: DHash (So sánh chi tiết nốt nhạc) ---
-    # Chuyển từ mảng NumPy (OpenCV) sang PIL Image để imagehash có thể đọc được
-    pil_img1 = Image.fromarray(gray1)
-    pil_img2 = Image.fromarray(gray2_resized)
-    
-    hash1 = imagehash.dhash(pil_img1)
-    hash2 = imagehash.dhash(pil_img2)
-    hash_diff = hash1 - hash2 # Khoảng cách Hamming
-
-    # Log để debug nếu cần
-    # print(f"DEBUG: SSIM = {score_ssim:.4f} | Hash Diff = {hash_diff}")
-
-    # --- ĐIỀU KIỆN KẾT HỢP ---
-    # SSIM > 0.9: Cùng bố cục, cùng font chữ, cùng lề
-    # Hash Diff <= 2: Các nốt nhạc nằm đúng vị trí (ngưỡng 14 bạn để hơi cao, dễ bị nhận nhầm)
-    is_duplicate = (score_ssim >= 0.80) and (hash_diff <= 20)
-    
-    return is_duplicate
-
-# ===== DETECT + CROP =====
-# def detect_and_crop():
-#     images = [f for f in os.listdir(IMG_DIR) if f.endswith(".jpg")]
-
-#     for img_file in images:
-#         img_path = os.path.join(IMG_DIR, img_file)
-#         img = cv2.imread(img_path)
-
-#         results = model(img, conf=0.5)
-
-#         for i, r in enumerate(results):
-#             if r.boxes is None:
-#                 continue
-
-#             boxes = r.boxes.xyxy
-
-#             for j, box in enumerate(boxes):
-#                 x1, y1, x2, y2 = map(int, box)
-
-#                 crop = img[y1:y2, x1:x2]
-
-#                 base_name = os.path.splitext(img_file)[0]
-#                 crop_name = f"{base_name}.jpg"
-#                 crop_path = os.path.join(CROP_DIR, crop_name)
-
-#                 cv2.imwrite(crop_path, crop)
-
-def detect_and_crop():
     images = []
     for root, dirs, files in os.walk(IMG_DIR):
         for file in files:
@@ -269,12 +206,24 @@ def detect_and_crop():
             _, best_box = max(areas)
 
             x1, y1, x2, y2 = map(int, best_box)
-            crop = img[y1:y2, x1:x2]
+            crop = img[y1:y2, x1:x2].copy()
 
             # 👉 bỏ crop trùng
             if last_crop is not None:
-                if check_duplicate(crop, last_crop):
+                is_duplicate, score = duplicate_checker_model.compare_advanced(last_crop, crop)
+                # cv2.putText(crop, f"Model Sim: {sim_score:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if is_similar else (0, 0, 255), 2)
+                # cv2.putText(crop, f"Sim: {score:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if is_duplicate else (0, 0, 255), 2)
+                # cv2.putText(crop, f"Duplicate (Sim: {score['final_score']:.2f})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if is_duplicate:
+                    # continue
+                    cv2.putText(crop, f"Duplicate (Sim: {score['final_score']:.2f})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                     continue
+                else:
+                    cv2.putText(crop, f"Unique (Sim: {score['final_score']:.2f})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    last_crop = crop.copy()
+
+            else:
+                last_crop = crop.copy() 
 
             base_name = os.path.splitext(os.path.basename(img_path))[0]
             crop_name = f"{base_name}.jpg"
@@ -282,7 +231,7 @@ def detect_and_crop():
 
             cv2.imwrite(crop_path, crop)
 
-            last_crop = crop
+            # last_crop = crop
             saved_count += 1
 
 def clean_filename(name):
@@ -294,8 +243,7 @@ def clean_filename(name):
     )
 
 # ===== RUN PROCESS =====
-def run_process(interval_sec, start_sec=0, end_sec=None, cleanup=True, type="links", links=None, videos=None):
-    cleanup_temp_files()
+def run_process(interval_sec, start_sec=0, end_sec=None, cleanup=True, type="links", links=None, videos=None, similarity_threshold=0.96):
 
     if type == "links":
         # ===== READ LINKS =====
@@ -316,7 +264,7 @@ def run_process(interval_sec, start_sec=0, end_sec=None, cleanup=True, type="lin
             capture_frames(video_path, interval_sec, start_sec, end_sec)
 
     # ===== DETECT + CROP =====
-    detect_and_crop()
+    detect_and_crop(similarity_threshold)
     merge_crops_to_image_and_pdf()
     cleanup_temp_files(cleanup)
 

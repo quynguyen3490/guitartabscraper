@@ -4,7 +4,7 @@ import imagehash
 from PIL import Image
 import cv2
 
-def check_duplicate(img1_cv, img2_cv):
+def check_duplicate(img1_cv, img2_cv, ssim_threshold=0.7, hash_threshold=20):
     # 1. Kiểm tra đầu vào
     if img1_cv is None or img2_cv is None:
         return False
@@ -41,14 +41,14 @@ def check_duplicate(img1_cv, img2_cv):
     # --- ĐIỀU KIỆN KẾT HỢP ---
     # SSIM > 0.9: Cùng bố cục, cùng font chữ, cùng lề
     # Hash Diff <= 2: Các nốt nhạc nằm đúng vị trí (ngưỡng 14 bạn để hơi cao, dễ bị nhận nhầm)
-    is_duplicate = (score_ssim >= 0.80 and hash_diff <= 20)
+    is_duplicate = (score_ssim >= ssim_threshold and hash_diff <= hash_threshold)
     
-    return is_duplicate
+    return score_ssim, hash_diff, is_duplicate
 
 
 # Khi gọi hàm:
-img1_cv = cv2.imread("Canon89.jpg")
-img2_cv = cv2.imread("Canon90.jpg")
+img1_cv = cv2.imread("t1.jpg")
+img2_cv = cv2.imread("t2.jpg")
 
 result = check_duplicate(img1_cv, img2_cv)
 print(result)

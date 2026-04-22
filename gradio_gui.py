@@ -50,9 +50,9 @@ def toggle_source(source):
             gr.update(visible=True)
         )
 
-def run_tab_scraper(source_type, link_input, videos, interval_sec, start_sec, end_sec, cleanup):
+def run_tab_scraper(source_type, link_input, videos, interval_sec, start_sec, end_sec, similarity_threshold, cleanup):
     save_links(link_input)
-    
+
     try:
         if source_type == "YouTube Links":
             type = "links"
@@ -66,7 +66,8 @@ def run_tab_scraper(source_type, link_input, videos, interval_sec, start_sec, en
             cleanup,
             type=type,
             links = link_input,
-            videos=videos
+            videos=videos,
+            similarity_threshold=float(similarity_threshold)
         )
         pdf_files = load_pdf()
 
@@ -122,6 +123,7 @@ with gr.Blocks(title="Tab Scraper") as demo:
         interval_input = gr.Number(label="Capture Interval (seconds)", value=15, minimum=1)
         start_input = gr.Number(label="Start Time (seconds)", value=0, minimum=0)
         end_input = gr.Number(label="End Time (seconds, leave empty for full)", value=None)
+        similarity_threshold_input = gr.Number(label="Similarity Threshold (0-1)", value=0.96, minimum=0, maximum=1)
 
     cleanup_checkbox = gr.Checkbox(label="Cleanup temporary files after processing", value=True)
 
@@ -139,6 +141,7 @@ with gr.Blocks(title="Tab Scraper") as demo:
             interval_input,
             start_input,
             end_input,
+            similarity_threshold_input,
             cleanup_checkbox
         ],
         outputs=[output_text, output_files]
